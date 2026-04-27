@@ -332,7 +332,7 @@ Phase 2 ─ V1 落地：回访环节（四大场景）
 | -------------------------------------------------------------- | ---------------------------------- |
 | [01-scenarios.md](01-scenarios.md)                             | 场景设计详述（意向分类、因素分析、策略生成、质量评价）        |
 | [02-infrastructure.md](02-infrastructure.md)                   | 数据基建与标签体系（三层标签、六张表、数据流）            |
-| [03-architecture.md](03-architecture.md)                       | 系统架构与 Agent 设计（5 个 Agent + 反馈闭环）   |
+| [03-architecture.md](03-architecture.md)                       | 系统架构与 Agent 设计（3 个 Agent + 反馈闭环）   |
 | [04-validation.md](04-validation.md)                           | 假设验证方法论（三个假设的验证方案）                 |
 | [05-experience-distillation.md](05-experience-distillation.md) | 经验萃取与检索设计（萃取 Prompt、向量检索、GraphRAG） |
 | [06-prompts.md](06-prompts.md)                                 | Prompt 全集（标签萃取 + 经验蒸馏 + 策略生成，共 6 个 Prompt + 执行工作流） |
