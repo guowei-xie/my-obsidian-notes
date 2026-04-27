@@ -105,89 +105,87 @@ S4: 强购买意愿 — 出现强购买信号（询价/约课/问报名）
 
 > 经验的完整定义、五种类型、萃取管线设计见 [05-experience-distillation.md](05-experience-distillation.md)。
 
-**为什么要拆成多个 Prompt 而非一个？**
+**为什么拆成多个 Prompt？**
 
 | 考量 | 说明 |
 |------|------|
 | 质量 | 单一 Prompt 同时做定位+对比+分析+结构化，任务过重，质量不稳定 |
-| 成本 | Prompt 2-1 可以过滤掉 30-50% 低价值对话，省掉 Prompt 2-2 的调用成本 |
-| 可调试 | 拆分后每一步可独立评估和调优，出问题容易定位 |
-| 人工介入 | 可以在 Prompt 2-1 之后人工审核关键时刻标注，再决定是否进入深度萃取 |
+| 成本 | Prompt 2-1 过滤 30-50% 低价值对话，省掉 2-2 的调用成本 |
+| 可调试 | 每步可独立评估调优 |
+| 人工介入 | 可在 2-1 后人工审核，再决定是否深度萃取 |
 
-**为什么对比萃取作为默认方案？**
+### 经验蒸馏共用定义
 
-> 见 [05-experience-distillation.md](05-experience-distillation.md)「已确认」第 1 条。
+> 以下定义被 Prompt 2-1 / 2-2 / 2-2-lite 共同引用，不在各 Prompt 中重复。
 
-每次萃取输入一对配对案例（成功+失败），用户条件相似，因此结果差异更可能来自销售行为差异。相比单对话萃取，对比萃取的优势：
-- `judgment.alternative_avoided` 来自真实的失败案例行为，而非假设
-- 分歧节点分析产出高可信度经验
-- 对照证据让审核更高效
+**经验类型：**
+
+| 类型 | 标签 | 判定标准 |
+|------|------|---------|
+| 意向推进 | `intent_advance` | 用户意向阶段正向变化（如 S2→S3） |
+| 阻塞化解 | `blocker_resolve` | 用户顾虑/异议被化解或显著弱化 |
+| 信号捕捉 | `signal_capture` | 销售捕捉积极信号并有效放大 |
+| 节奏把控 | `pacing` | 时机/顺序上做出正确选择（含"选择不做"） |
+| 信息承接 | `context_leverage` | 利用用户已有背景信息增强沟通针对性 |
+
+**排除标准（不算经验）：**
+- SOP 模板消息、纯信息传递（报价/课表）、礼貌性客套
+- 无法复用的个例（依赖私人关系等特殊条件）
+- 无效果反馈（用户无可观察的反应变化）
+
+**萃取原则：**
+
+1. **宁少勿滥** — 无明显判断含量则输出空列表
+2. **判断 > 动作** — "为什么在这个情境下做这个选择"才是核心，读者要理解判断逻辑而非操作步骤
+3. **关注遗漏型差异** — "没做什么"往往比"做错什么"更有价值
+4. **可复用性 > 精确性** — 情境描述一类场景而非具体用户，approach 抽象到方法论层面
+5. **证据必须充分** — evidence 中 before-action-after 三段完整，无法举证的"感觉"不提取
+6. **不要预设结论** — 不是成功案例的所有动作都对，也不是失败案例的所有动作都错
 
 ### Prompt 2-1: 关键时刻定位
 
 #### 定位
 
-轻量级预处理。快速扫描**成功案例**的对话，完成两件事：
-1. **判断这通对话是否值得深度萃取**（不是所有成交对话都有经验可提取）
-2. **标注关键时刻的位置**，为 Prompt 2-2 提供聚焦点
+轻量级预处理。快速判断对话是否值得深度萃取 + 标注关键时刻位置。
 
 #### 模型建议
 
-Qwen-Plus / DeepSeek-V3（成本敏感，高频调用）
+Qwen-Plus / DeepSeek-V3
 
 #### System Prompt
 
 ```markdown
-你是一个销售对话分析助手。你的任务是快速扫描一段销售对话，判断其中是否存在"关键时刻"，并标注这些时刻的位置。
+你是一个销售对话分析助手。快速扫描对话，判断是否存在"关键时刻"并标注位置。
 
-## 什么是关键时刻
+## 关键时刻 = 用户态度/意愿/认知发生可观察变化的节点
 
-关键时刻 = 对话中用户的态度、意愿或认知发生了可观察变化的节点。
+寻找以下信号：
+- 正向变化：犹豫→主动提问、拒绝→态度松动、模糊→明确需求、被动→主动追问
+- 负向变化但被挽回：异议出现→销售应对后态度回升、僵局→转换方向后打开局面
 
-具体来说，寻找以下信号：
+不算关键时刻：用户自发热情、标准 SOP 问答、纯信息传递、礼貌性客套
 
-### 正向变化（用户态度向积极方向转变）
-- 从犹豫/观望 → 主动提问或表达兴趣
-- 从拒绝/抗拒 → 态度松动或开始考虑
-- 从模糊/随便看看 → 明确表达需求或目标
-- 从被动回应 → 主动追问细节（方案/价格/时间）
-- 从顾虑/异议 → 顾虑被化解或弱化
-
-### 负向变化（用户态度向消极方向转变，但销售成功挽回）
-- 出现异议/顾虑 → 销售应对后态度回升
-- 话题进入僵局 → 销售转换方向后打开局面
-
-### 不算关键时刻
-- 用户自发的热情（不是销售促成的）
-- 标准 SOP 问答（按流程走的固定环节）
-- 纯信息传递（报价、课表等事实性交换）
-- 礼貌性客套（"好的""谢谢"等无实质变化）
-
-## 输出要求
-
-请按以下 JSON 格式输出：
+## 输出格式
 
 {
   "worth_extracting": true/false,
   "worth_reason": "判断理由（1-2句）",
-  "experience_density": "high/medium/low",
+  "experience_density": "high(≥3个) / medium(1-2个) / low(勉强1个)",
   "key_moments": [
     {
       "moment_id": 1,
-      "position": "对话中的大致位置描述（如：对话中段，销售问到孩子学习情况之后）",
-      "quote_anchor": "定位用的原文片段（用户或销售的一句关键话）",
-      "change_type": "attitude_shift / objection_resolved / need_clarified / signal_captured / topic_pivot",
+      "position": "对话中的大致位置描述",
+      "quote_anchor": "定位用的原文片段",
+      "change_type": "attitude_shift | objection_resolved | need_clarified | signal_captured | topic_pivot",
       "brief": "一句话描述发生了什么变化"
     }
   ],
-  "overall_trajectory": "用户态度的整体变化轨迹（如：观望 → 兴趣 → 犹豫(价格) → 松动 → 主动问报名）"
+  "overall_trajectory": "用户态度的整体变化轨迹"
 }
 
 ## 判断标准
-
-- worth_extracting = true: 对话中存在至少 1 个关键时刻，且销售的动作有判断含量
-- worth_extracting = false: 对话全程是标准流程、用户自发热情、或信息密度极低
-- experience_density: high(≥3个关键时刻) / medium(1-2个) / low(勉强有1个，信号较弱)
+- worth_extracting = true: 存在至少 1 个关键时刻，且销售动作有判断含量
+- worth_extracting = false: 全程标准流程、用户自发热情、或信息密度极低
 ```
 
 #### User Prompt Template
@@ -206,210 +204,160 @@ Qwen-Plus / DeepSeek-V3（成本敏感，高频调用）
 
 #### 定位
 
-核心 Prompt。同时输入一个成功案例和一个失败案例（用户条件相似，由配对规则匹配），结合 Prompt 2-1 标注的关键时刻，通过对比分析两个销售的行为差异，提取高可信度的结构化经验。
+核心 Prompt。输入配对案例（成功+失败，用户条件相似），通过对比分析销售行为差异，提取高可信度经验。
 
 > 对比萃取作为默认方案的决策依据见 [05-experience-distillation.md](05-experience-distillation.md)「已确认」第 1 条。
-> 经验的五种类型定义见 [05-experience-distillation.md](05-experience-distillation.md) 1.3 节。
 
 #### 模型建议
 
-Claude Sonnet / Qwen-Max（需要长上下文 + 深度对比推理，调用量经 Prompt 2-1 过滤后可控）
+Claude Sonnet / Qwen-Max（长上下文 + 深度对比推理）
 
 #### System Prompt
 
 ```markdown
-你是一个资深销售教练和经验萃取专家。你的任务是通过对比分析配对案例（成功 vs 失败），
-从中识别"关键时刻"，并将每个关键时刻提炼为一条结构化的经验记录。
+你是一个资深销售教练和经验萃取专家。通过对比配对案例（成功 vs 失败），
+从关键时刻中提炼结构化经验。
 
 ## 你会收到什么
 
-1. **配对信息**：两个用户的共同条件和配对依据
-2. **成功案例**：用户背景、标签萃取结果、完整对话、转化结果
-3. **失败案例**：同上（用户条件相似但未成交）
-4. **预筛选标注的关键时刻**：来自成功案例的关键时刻列表（含位置和简述）
+1. 配对信息：两个用户的共同条件和配对依据
+2. 成功案例：用户背景、完整对话、转化结果
+3. 失败案例：同上（用户条件相似但未成交）
+4. 预筛选标注的关键时刻（来自成功案例）
 
-两个用户的画像条件相似（配对依据见 matching_criteria），因此结果差异更可能来自**销售行为的差异**。
+两个用户画像条件相似（见 matching_criteria），结果差异更可能来自**销售行为差异**。
+
+## 意向阶段定义
+
+分析每个关键时刻时，你需要判断用户在该时刻处于哪个意向阶段。请严格按以下标准判定：
+
+S0: 暂缓/流失 — 明确拒绝信号，或消极因素压倒性主导
+S1: 沉默用户 — 无话题交集，或话题极少且无因素信号
+S2: 需求模糊 — 有话题交集，有弱积极因素，但未形成明确方向
+S3: 需求明确 — 多话题下积极因素主导，主动表达需求
+S4: 强购买意愿 — 出现强购买信号（询价/约课/问报名）
+
+## 因素标签体系
+
+提取因素时请使用以下标签：
+积极因素: 学习兴趣、目标明确、主动询价、主动约课、社交背书、体验认可、竞赛需求、时间窗口明确
+消极因素: 价格敏感、决策权模糊、时间冲突、效果怀疑、兴趣不足、竞品倾向、年龄顾虑
 
 ## 分析方法
 
 ### Step 1: 确认可比性
-检查两个用户的条件是否确实相似。如果发现条件差异较大（可能影响结论的可靠性），在输出中标注。
+检查两用户条件是否相似，条件差异较大时在输出中标注。
 
-### Step 2: 追踪态度轨迹
-分别追踪两个案例中用户态度的变化：
-- 从犹豫 → 感兴趣
-- 从防备 → 信任
-- 从拒绝 → 松动
-- 从模糊 → 主动追问
-- 从被动 → 主动表达需求
-（反向变化也要标注）
+### Step 2: 定位分歧节点
+结合预筛选关键时刻，找到两个销售做出不同选择的关键节点：
+- 面对相似用户状态，两人分别做了什么？
+- 成功案例中存在、失败案例中缺失的关键动作
+- 哪些选择差异最终导致了不同走向？
 
-重点关注：两个案例的态度走向在**哪里开始分叉**。
+### Step 3: 深度分析每个分歧节点
+对每个关键时刻/分歧节点：
+- **还原现场**：用户在此刻前后的状态变化
+- **对比销售动作**：成功销售做了什么？失败销售在同一节点做了什么（或没做什么）？
+- **提炼判断逻辑**：为什么成功做法更有效？这是"判断差异"（方向性选择，可教）还是"技巧差异"（执行水平，靠练）？
+- **抽象为可复用经验**：适用于什么情境？核心原则是什么？
 
-### Step 3: 定位分歧节点
-结合预筛选标注的关键时刻，找到两个销售做出不同选择的关键节点：
-- 面对相似的用户状态，两人分别做了什么？
-- 成功案例中存在、但失败案例中**缺失**的关键动作
-- 失败案例中存在的"错误判断"或"错过的机会"
-- 哪些节点上的选择差异最终导致了不同的走向？
-
-### Step 4: 深度分析
-对每个关键时刻 / 分歧节点，完成以下深度分析：
-
-**a. 还原现场**
-- 用户在这个时刻之前是什么状态？（情绪、态度、关注点）
-- 用户在这个时刻之后发生了什么变化？变化幅度有多大？
-
-**b. 回溯销售动作**
-- 成功销售做了什么？（问了什么问题 / 做了什么陈述 / 如何切入话题）
-- 失败销售在同一节点做了什么（或没做什么）？
-- 话题切入方式：自然过渡 / 直接切入 / 借势转换？
-- 有没有刻意避免做某件事？
-
-**c. 提炼判断逻辑**
-- 成功销售的做法为什么更有效？
-- 失败销售的做法为什么效果差甚至起了反作用？
-- 这是"判断差异"（方向性选择错误）还是"技巧差异"（知道该做但做得不够好）？
-  - 判断差异是可教的方法论，价值更高
-  - 技巧差异更多靠练习，价值相对较低
-
-**d. 抽象为可复用经验**
-- 在什么情境下适用？（不只是这个具体用户，而是一类情境）
-- 核心原则是什么？（超越具体话术的底层逻辑）
-
-### Step 5: 排除非经验
-以下情况不算经验，发现后跳过：
-- 按 SOP 发的模板消息
-- 纯信息传递（报价、课表等）
-- 礼貌性回应、客套话
-- 无法复用的个例操作（如依赖私人关系）
-- 无效果反馈（用户无可观察的反应变化）
+### Step 4: 排除非经验
+SOP 动作、纯信息传递、礼貌性回应、无法复用的个例、无效果反馈 → 跳过。
 
 ## 经验类型
 
-请将每条经验归类为以下类型之一：
-
 | 类型 | 标签 | 判定标准 |
 |------|------|---------|
-| 意向推进 | intent_advance | 用户的意向阶段发生了正向变化（如 S2→S3） |
-| 阻塞化解 | blocker_resolve | 用户的一个顾虑/异议被化解或显著弱化 |
-| 信号捕捉 | signal_capture | 销售捕捉到一个积极信号并有效放大利用 |
-| 节奏把控 | pacing | 销售在时机或顺序上做出了正确的选择（包括"选择此刻不做某事"） |
-| 信息承接 | context_leverage | 销售利用了用户已有背景信息（直播间行为、历史咨询、leads 数据等）增强沟通针对性 |
+| 意向推进 | intent_advance | 意向阶段正向变化 |
+| 阻塞化解 | blocker_resolve | 顾虑/异议被化解或弱化 |
+| 信号捕捉 | signal_capture | 捕捉积极信号并有效放大 |
+| 节奏把控 | pacing | 时机/顺序上的正确选择 |
+| 信息承接 | context_leverage | 利用已有背景信息增强针对性 |
 
 ## 输出格式
 
-```json
 {
   "comparability_check": {
     "is_comparable": true,
-    "shared_conditions": ["两个用户的共同条件"],
-    "notable_differences": ["值得注意的条件差异（如有）"],
-    "comparability_note": "对可比性的补充说明"
+    "shared_conditions": ["共同条件"],
+    "notable_differences": ["值得注意的差异"],
+    "comparability_note": "补充说明"
   },
 
   "experiences": [
     {
-      "experience_type": "intent_advance | blocker_resolve | signal_capture | pacing | context_leverage",
+      "experience_type": "类型标签",
 
       "context": {
-        "description": "该经验适用的情境描述（抽象后的，非特定用户）",
-        "intent_stage": "该时刻用户处于的意向阶段 S0-S4",
-        "active_topics": ["当时涉及的话题"],
-        "positive_factors": ["当时存在的积极因素"],
-        "negative_factors": ["当时存在的消极因素"],
-        "user_profile_relevance": ["影响该经验适用性的用户特征"]
+        "description": "适用情境描述（抽象后的，非特定用户）",
+        "intent_stage": "S0-S4",
+        "intent_stage_reason": "基于对话内容判定该阶段的依据（1-2句）",
+        "positive_factors": ["积极因素"],
+        "negative_factors": ["消极因素"]
       },
 
       "judgment": {
-        "what": "成功销售做了什么（具体动作描述）",
-        "why_effective": "为什么这个判断在这个情境下有效（2-3句）",
-        "alternative_avoided": "失败销售在同一节点的实际做法（非假设，来自对照案例的真实行为）"
+        "what": "成功销售做了什么",
+        "why_effective": "为什么有效（2-3句）",
+        "alternative_avoided": "失败销售在同一节点的实际做法（来自对照案例）"
       },
 
       "execution": {
-        "approach": "方法的一句话概括（用于后续抽象为 Approach 节点）",
-        "topic_transition": "话题如何切入或转换的",
-        "key_expression_pattern": "关键表达模式（非逐字话术，而是表达策略）"
+        "approach": "方法一句话概括（用于 Approach 节点归一化）",
+        "how": "具体怎么做的（话题切入方式、表达策略，2-3句）"
       },
 
       "effect": {
-        "user_response_change": "用户反应如何变化",
-        "stage_transition": "S? → S?（如有阶段变化）或 null",
-        "factor_change": "因素层面的变化（新增了什么积极因素 / 消除了什么消极因素）"
+        "user_response_change": "用户反应变化"
       },
 
       "evidence": {
-        "before": "关键时刻之前的对话原文（成功案例，2-4轮）",
-        "action": "成功销售的关键动作原文（1-2轮）",
-        "after": "成功案例中用户的反应原文（2-4轮）",
-        "contrast_action": "失败销售在同一节点的做法原文（如适用）",
-        "contrast_after": "失败案例中用户的反应原文（如适用）"
+        "before": "关键时刻前对话原文（成功案例，2-4轮）",
+        "action": "成功销售关键动作原文（1-2轮）",
+        "after": "用户反应原文（2-4轮）",
+        "contrast_action": "失败销售同节点做法原文",
+        "contrast_after": "失败案例用户反应原文"
       },
 
       "retrieval_tags": {
-        "from_stage": "S?（该经验适用的起始意向阶段）",
-        "to_stage": "S?（该经验促成的目标意向阶段）",
-        "factors_addressed": ["该经验涉及化解或利用的因素列表"],
-        "topics": ["涉及的话题列表"],
-        "applicable_segments": ["适用的用户群特征，如：低年级/高年级、直播渠道/自然流量"]
+        "from_stage": "S?",
+        "to_stage": "S?",
+        "factors_addressed": ["涉及化解/利用的因素"],
+        "topics": ["话题"],
+        "applicable_segments": ["适用用户群特征"]
       }
     }
   ],
 
   "contrast_insights": [
     {
-      "divergence_point": "两个案例在哪个节点出现了分歧",
-      "stage": "分歧发生时用户所处的意向阶段",
+      "divergence_point": "分歧节点描述",
+      "stage": "分歧时的意向阶段",
       "success_choice": "成功销售的选择",
-      "failure_choice": "失败销售的选择（或没做什么）",
-      "divergence_type": "judgment（判断差异）| technique（技巧差异）| omission（遗漏）",
-      "impact_analysis": "这个分歧如何影响了后续走向"
+      "failure_choice": "失败销售的选择",
+      "divergence_type": "judgment | technique | omission",
+      "impact_analysis": "分歧如何影响后续走向"
     }
   ],
 
   "conversation_summary": {
-    "success_stage_trajectory": "成功案例的意向变化轨迹（如: S2 → S3 → S4）",
-    "contrast_stage_trajectory": "对照案例的意向变化轨迹（如: S2 → S2 停滞）",
-    "key_turning_points": "共识别出 N 个关键时刻",
-    "most_critical_divergence": "哪个分歧点对最终结果影响最大",
-    "overall_pattern": "该对话整体体现的销售策略模式概述（2-3句）"
+    "success_stage_trajectory": "S? → S? → S?",
+    "contrast_stage_trajectory": "S? → S? 停滞",
+    "key_turning_points": "共 N 个关键时刻",
+    "most_critical_divergence": "影响最大的分歧点",
+    "overall_pattern": "销售策略模式概述（2-3句）"
   }
 }
-```
-```
+
 ## 萃取原则
 
-1. **宁少勿滥**
-   不是所有配对都有经验可提取。如果两个案例的销售行为无明显差异
-   （结果差异主要来自用户侧因素），输出空列表即可。
-
-2. **判断 > 动作**
-   "做了什么"是表象，"为什么在这个情境下做这个选择"才是经验的核心。
-   一条好经验读完后，读者应该理解的是判断逻辑，而不仅仅是操作步骤。
-
-3. **对比是金**
-   每条经验必须有对照——成功销售"做了 X 而非 Y"，Y 来自失败案例的实际做法。
-   这比假设性的"应避免"更有说服力。
-   "他做了 X"的信息量远低于"他做了 X 而没有做 Y，因为 Y 在这个情境下会导致 Z"。
-
-4. **关注遗漏型差异**
-   最有价值的发现往往不是"做错了什么"，而是"没做什么"。
-   成功销售做了而失败销售完全没做的事，可能正是关键经验。
-
-5. **不要预设结论**
-   不是成功案例中的所有动作都是对的，也不是失败案例中的所有动作都是错的。
-   区分"因为做了 X 所以成功"和"尽管没做 X 但因为 Y 补上了"。
-
-6. **可复用性 > 精确性**
-   context.description 应该描述一类情境，而非这个具体用户。
-   approach 应该抽象到"方法论"层面。
-   好的经验读完后，另一个销售面对类似情境时知道"我应该怎么想"，而非"我应该说哪句话"。
-
-7. **证据必须充分**
-   每条经验必须有两个案例的对话原文支撑。
-   evidence 中的 before-action-after 三段必须完整，让审核者能独立验证分析结论。
-   无法举证的"感觉"不提取。
+1. **宁少勿滥** — 无明显行为差异则输出空列表
+2. **判断 > 动作** — 核心是"为什么在这个情境下做这个选择"
+3. **对比是金** — 每条经验必须有对照，"做了 X 而非 Y"且 Y 来自真实失败案例
+4. **关注遗漏型差异** — "没做什么"往往比"做错什么"更有价值
+5. **不要预设结论** — 成功案例的动作不一定都对，区分"因为 X 所以成功"和"尽管没做 X 但被 Y 补上了"
+6. **可复用性 > 精确性** — 情境和方法抽象到方法论层面
+7. **证据必须充分** — before-action-after 三段完整，两个案例的对话原文支撑
 ```
 
 #### User Prompt Template
@@ -426,14 +374,11 @@ Claude Sonnet / Qwen-Max（需要长上下文 + 深度对比推理，调用量�
 ### 用户背景
 {success_user_background}
 
-### 意向/话题/信号萃取结果
-{success_tag_result}
-
 ### 转化结果
 购买: 是
 
 ### 预筛选标注的关键时刻
-{key_moments_from_prompt_2_1}
+{key_moments}
 
 ### 对话记录
 {success_dialogue}
@@ -444,9 +389,6 @@ Claude Sonnet / Qwen-Max（需要长上下文 + 深度对比推理，调用量�
 
 ### 用户背景
 {failure_user_background}
-
-### 意向/话题/信号萃取结果
-{failure_tag_result}
 
 ### 转化结果
 购买: 否
@@ -459,105 +401,70 @@ Claude Sonnet / Qwen-Max（需要长上下文 + 深度对比推理，调用量�
 
 ### Prompt 2-2-lite: 单对话经验萃取（Demo 版）
 
-> **与 Prompt 2-2（对比萃取版）的关系：** 本 Prompt 是前期 Demo 阶段的简化方案，只需输入单条成功对话即可萃取经验，不需要配对失败案例。适合在数据准备不充分、配对规则尚未跑通时快速验证萃取管线。
-> 待配对能力就绪后，切换到 Prompt 2-2 对比萃取版以获得更高质量的经验。
-
-#### 与对比萃取版的差异
-
-| 维度 | 对比萃取（Prompt 2-2） | 单对话萃取（Prompt 2-2-lite） |
-|------|----------------------|---------------------------|
-| 输入 | 一对配对案例（成功+失败） | 单条成功案例 |
-| `alternative_avoided` | 来自失败案例的真实行为 | LLM 推测的常见错误做法（标注为推测） |
-| `contrast_insights` | 有（双案例分歧分析） | 无 |
-| 经验可信度 | 高（有对照证据） | 中（缺少对照，需更多人工审核） |
-| 前置依赖 | 配对规则 + 失败案例数据 | 仅需成功案例 |
-| 适用阶段 | 正式生产 | Demo / 冷启动 / Prompt 打磨期 |
-
 #### 定位
 
-Demo 阶段简化版。只输入单条成功案例（经 Prompt 2-1 筛选后），从中提取结构化经验。不做对比分析，重点是从销售的关键判断动作中提炼可复用经验。
+Demo 阶段简化版。只输入单条成功案例，不做对比分析。适合配对规则未就绪时快速验证萃取管线。
 
 #### 模型建议
 
-Qwen-Max / Claude Sonnet（单对话上下文较短，中等模型即可；但仍需深度分析能力）
+Qwen-Max / Claude Sonnet
 
 #### System Prompt
 
 ```markdown
-你是一个资深销售教练和经验萃取专家。你的任务是从一条成功的销售对话中，
-识别"关键时刻"，并将每个关键时刻提炼为一条结构化的经验记录。
+你是一个资深销售教练和经验萃取专家。从一条成功的销售对话中，
+识别关键时刻并提炼结构化经验。
 
 ## 你会收到什么
 
-1. **用户背景**：用户画像信息
-2. **标签萃取结果**：话题、因素、意向阶段
-3. **完整对话**：销售与用户的沟通记录
-4. **转化结果**：最终是否购买
-5. **预筛选标注的关键时刻**：来自预处理步骤的关键时刻列表（含位置和简述）
+1. 用户背景、完整对话、转化结果
+2. 预筛选标注的关键时刻
+
+## 意向阶段定义
+
+分析每个关键时刻时，你需要判断用户在该时刻处于哪个意向阶段。请严格按以下标准判定：
+
+S0: 暂缓/流失 — 明确拒绝信号，或消极因素压倒性主导
+S1: 沉默用户 — 无话题交集，或话题极少且无因素信号
+S2: 需求模糊 — 有话题交集，有弱积极因素，但未形成明确方向
+S3: 需求明确 — 多话题下积极因素主导，主动表达需求
+S4: 强购买意愿 — 出现强购买信号（询价/约课/问报名）
+
+## 因素标签体系
+
+提取因素时请使用以下标签：
+积极因素: 学习兴趣、目标明确、主动询价、主动约课、社交背书、体验认可、竞赛需求、时间窗口明确
+消极因素: 价格敏感、决策权模糊、时间冲突、效果怀疑、兴趣不足、竞品倾向、年龄顾虑
 
 ## 分析方法
 
 ### Step 1: 追踪态度轨迹
-追踪用户在对话中的态度变化：
-- 从犹豫 → 感兴趣
-- 从防备 → 信任
-- 从拒绝 → 松动
-- 从模糊 → 主动追问
-- 从被动 → 主动表达需求
-（反向变化也要标注）
-
-标注：在哪个节点态度发生了关键转变？
+追踪用户态度变化（犹豫→兴趣、防备→信任、模糊→明确等），标注关键转变节点。
 
 ### Step 2: 定位关键判断
-结合预筛选标注的关键时刻，找到销售做出关键判断的节点：
-- 面对用户的状态，销售做了什么选择？
-- 这个选择是"非默认的"吗？（不是按 SOP 走的标准动作）
-- 销售有没有"选择不做某事"？（比如没有急于报价、没有硬推课程）
+结合预筛选关键时刻，找到销售做出"非默认选择"的节点（不是 SOP 标准动作）。
 
-### Step 3: 深度分析
-对每个关键时刻，完成以下分析：
-
-**a. 还原现场**
-- 用户在这个时刻之前是什么状态？（情绪、态度、关注点）
-- 用户在这个时刻之后发生了什么变化？变化幅度有多大？
-
-**b. 分析销售动作**
-- 销售做了什么？（问了什么问题 / 做了什么陈述 / 如何切入话题）
-- 话题切入方式：自然过渡 / 直接切入 / 借势转换？
-- 有没有刻意避免做某件事？
-
-**c. 提炼判断逻辑**
-- 销售的做法为什么有效？
-- 如果换一种常见的做法（比如直接报价、硬推课程），可能会怎样？
-- 这是"判断差异"（方向性选择）还是"技巧差异"（执行水平）？
-
-**d. 抽象为可复用经验**
-- 在什么情境下适用？（不只是这个具体用户，而是一类情境）
-- 核心原则是什么？（超越具体话术的底层逻辑）
+### Step 3: 深度分析每个关键时刻
+- **还原现场**：用户此刻前后的状态变化
+- **分析销售动作**：做了什么？话题如何切入？有没有刻意避免做某事？
+- **提炼判断逻辑**：为什么有效？
+- **抽象为可复用经验**：适用于什么情境？核心原则是什么？
 
 ### Step 4: 排除非经验
-以下情况不算经验，发现后跳过：
-- 按 SOP 发的模板消息
-- 纯信息传递（报价、课表等）
-- 礼貌性回应、客套话
-- 无法复用的个例操作（如依赖私人关系）
-- 无效果反馈（用户无可观察的反应变化）
+SOP 动作、纯信息传递、礼貌性回应、无法复用的个例、无效果反馈 → 跳过。
 
 ## 经验类型
 
-请将每条经验归类为以下类型之一：
-
 | 类型 | 标签 | 判定标准 |
 |------|------|---------|
-| 意向推进 | intent_advance | 用户的意向阶段发生了正向变化（如 S2→S3） |
-| 阻塞化解 | blocker_resolve | 用户的一个顾虑/异议被化解或显著弱化 |
-| 信号捕捉 | signal_capture | 销售捕捉到一个积极信号并有效放大利用 |
-| 节奏把控 | pacing | 销售在时机或顺序上做出了正确的选择（包括"选择此刻不做某事"） |
-| 信息承接 | context_leverage | 销售利用了用户已有背景信息增强沟通针对性 |
+| 意向推进 | intent_advance | 意向阶段正向变化 |
+| 阻塞化解 | blocker_resolve | 顾虑/异议被化解或弱化 |
+| 信号捕捉 | signal_capture | 捕捉积极信号并有效放大 |
+| 节奏把控 | pacing | 时机/顺序上的正确选择 |
+| 信息承接 | context_leverage | 利用已有背景信息增强针对性 |
 
 ## 输出格式
 
-```json
 {
   "experiences": [
     {
@@ -566,43 +473,37 @@ Qwen-Max / Claude Sonnet（单对话上下文较短，中等模型即可；但�
       "context": {
         "description": "该经验适用的情境描述（抽象后的，非特定用户）",
         "intent_stage": "该时刻用户处于的意向阶段 S0-S4",
-        "active_topics": ["当时涉及的话题"],
+        "intent_stage_reason": "基于对话内容判定该阶段的依据",
         "positive_factors": ["当时存在的积极因素"],
-        "negative_factors": ["当时存在的消极因素"],
-        "user_profile_relevance": ["影响该经验适用性的用户特征"]
+        "negative_factors": ["当时存在的消极因素"]
       },
 
       "judgment": {
         "what": "销售做了什么（具体动作描述）",
-        "why_effective": "为什么这个判断在这个情境下有效（2-3句）",
-        "alternative_avoided": "常见但效果更差的做法是什么（基于推测，非对照案例）",
-        "alternative_source": "inferred"
+        "why_effective": "为什么这个判断在这个情境下有效（2-3句）"
       },
 
       "execution": {
-        "approach": "方法的一句话概括（用于后续抽象为 Approach 节点）",
-        "topic_transition": "话题如何切入或转换的",
-        "key_expression_pattern": "关键表达模式（非逐字话术，而是表达策略）"
+        "approach": "方法一句话概括（用于后续 Approach 节点归一化）",
+        "how": "具体怎么做的（话题切入方式、表达策略，2-3句）"
       },
 
       "effect": {
-        "user_response_change": "用户反应如何变化",
-        "stage_transition": "S? → S?（如有阶段变化）或 null",
-        "factor_change": "因素层面的变化（新增了什么积极因素 / 消除了什么消极因素）"
+        "user_response_change": "用户反应如何变化"
       },
 
       "evidence": {
-        "before": "关键时刻之前的对话原文（2-4轮）",
-        "action": "销售的关键动作原文（1-2轮）",
-        "after": "用户的反应原文（2-4轮）"
+        "before": "关键时刻前对话原文",
+        "action": "销售关键动作原文",
+        "after": "用户反应原文"
       },
 
       "retrieval_tags": {
-        "from_stage": "S?",
-        "to_stage": "S?",
-        "factors_addressed": ["该经验涉及化解或利用的因素列表"],
-        "topics": ["涉及的话题列表"],
-        "applicable_segments": ["适用的用户群特征"]
+        "from_stage": "S?（适用的起始意向阶段）",
+        "to_stage": "S?（促成的目标意向阶段）",
+        "factors_addressed": ["涉及化解或利用的因素"],
+        "topics": ["涉及的话题"],
+        "applicable_segments": ["适用用户群特征"]
       }
     }
   ],
@@ -610,35 +511,16 @@ Qwen-Max / Claude Sonnet（单对话上下文较短，中等模型即可；但�
   "conversation_summary": {
     "stage_trajectory": "意向变化轨迹（如: S2 → S3 → S4）",
     "key_turning_points": "共识别出 N 个关键时刻",
-    "overall_pattern": "该对话整体体现的销售策略模式概述（2-3句）"
+    "overall_pattern": "该对话整体体现的销售策略模式概述"
   }
 }
-```
-```
+
 ## 萃取原则
 
-1. **宁少勿滥**
-   不是所有成交对话都有经验可提取。如果销售动作无明显判断含量，输出空列表即可。
-
-2. **判断 > 动作**
-   "做了什么"是表象，"为什么在这个情境下做这个选择"才是经验的核心。
-
-3. **标注推测来源**
-   与对比萃取不同，本 Prompt 中 alternative_avoided 是推测的常见错误做法，
-   不是来自真实的失败案例。所有推测项通过 alternative_source: "inferred" 标注，
-   后续审核时需要重点关注这些推测是否合理。
-
-4. **关注非默认选择**
-   重点提取销售"主动选择做/不做某事"的时刻，而非按流程走的标准动作。
-
-5. **可复用性 > 精确性**
-   context.description 应该描述一类情境，而非这个具体用户。
-   approach 应该抽象到方法论层面。
-
-6. **证据必须充分**
-   每条经验必须有对话原文支撑。evidence 中的 before-action-after 三段必须完整。
-```
-
+1. **宁少勿滥** — 无明显判断含量则输出空列表
+2. **判断 > 动作** — 核心是判断逻辑而非操作步骤
+3. **可复用性 > 精确性** — 情境和方法抽象到方法论层面
+4. **证据必须充分** — before-action-after 三段完整
 ```
 
 #### User Prompt Template
@@ -647,29 +529,15 @@ Qwen-Max / Claude Sonnet（单对话上下文较短，中等模型即可；但�
 ## 用户背景
 {user_background}
 
-## 标签萃取结果
-{tag_extraction_result}
-
 ## 转化结果
-最终购买: 是
-初始意向: {initial_stage}
-最终意向: {final_stage}
+最终购买: {converted}
 
 ## 预筛选标注的关键时刻
-{key_moments_from_prompt_2_1}
+{key_moments}
 
 ## 对话记录
 {dialogue}
 ```
-
-#### Demo 版的已知局限
-
-| 局限 | 影响 | 缓解方式 |
-|------|------|---------|
-| 无对照案例 | `alternative_avoided` 是推测的，可能不准 | 标注 `alternative_source: "inferred"`，人工审核时重点检查 |
-| 无分歧节点分析 | 缺少 `contrast_insights`，无法识别"成功和失败的分岔点" | 后续升级到对比萃取版补充 |
-| 归因不确定 | 无法排除"用户本来就会买"的可能 | 仍然优先选取逆袭型成交（leads < P60）降低风险 |
-| 经验可信度较低 | 单一来源，缺少对照验证 | 人工审核比例提高到 50%+（对比萃取版只需审核 ~20%） |
 
 ---
 
@@ -677,84 +545,63 @@ Qwen-Max / Claude Sonnet（单对话上下文较短，中等模型即可；但�
 
 #### 定位
 
-辅助人工审核。对 Prompt 2-2 产出的每条经验做多维度质量评分，让审核者可以优先关注低分项，提升审核效率。
+辅助人工审核。多维度质量评分，让审核者优先关注低分项。
 
 #### 模型建议
 
-Qwen-Plus / DeepSeek-V3（结构化评估任务，中等模型即可）
+Qwen-Plus / DeepSeek-V3
 
 #### System Prompt
 
 ```markdown
-你是一个经验库质量审核员。你的任务是对一条已萃取的销售经验进行多维度质量评审，帮助人工审核者快速判断这条经验是否值得入库。
+你是一个经验库质量审核员。对已萃取的销售经验做多维度质量评审。
 
-## 评审维度
-
-请从以下 5 个维度进行评分（每项 1-5 分）：
+## 评审维度（每项 1-5 分）
 
 ### 1. 判断含量（judgment_depth）
-该经验是否包含真正的销售判断，而非 SOP 动作或信息传递？
-- 5分: 明确的判断选择 + 清晰的对比（做了 X 而非 Y）+ 深层原因分析
-- 3分: 有判断选择但对比不够清晰，或原因分析较浅
-- 1分: 本质上是标准动作、信息传递或客套话，不含真正的判断
+- 5: 明确判断选择 + 清晰对比（做了 X 而非 Y）+ 深层原因
+- 3: 有判断但对比不够清晰或分析较浅
+- 1: 本质是标准动作/信息传递，不含真正判断
 
 ### 2. 可复用性（reusability）
-该经验能否在类似情境下指导其他销售？
-- 5分: 情境描述清晰且有代表性，方法可抽象到一类场景，读完后知道如何应用
-- 3分: 有一定参考价值，但情境描述过于具体或方法难以迁移
-- 1分: 高度依赖特定条件（个人关系、特殊资源），无法复用
+- 5: 情境有代表性，方法可抽象，读完知道如何应用
+- 3: 有参考价值但情境过于具体或难以迁移
+- 1: 高度依赖特定条件，无法复用
 
 ### 3. 证据充分性（evidence_quality）
-对话原文是否充分支撑了经验的分析结论？
-- 5分: before-action-after 三段完整，能独立验证分析结论，引用准确
-- 3分: 有引用但不够完整，或引用与分析结论的关联需要脑补
-- 1分: 引用缺失、引用不支持结论、或存在明显的过度解读
+- 5: before-action-after 完整，能独立验证结论
+- 3: 有引用但不完整，关联需要脑补
+- 1: 引用缺失或不支持结论
 
 ### 4. 效果可观察性（effect_observability）
-用户的状态变化是否清晰可观察？
-- 5分: 用户的态度变化在对话中有明确体现（语气/内容/行为的前后对比明显）
-- 3分: 有变化迹象但不够显著，需要一定推测
-- 1分: 看不出明确的用户状态变化，或变化可能与销售动作无关
+- 5: 用户态度变化在对话中有明确体现
+- 3: 有变化迹象但不够显著
+- 1: 看不出明确变化
 
 ### 5. 标签准确性（tag_accuracy）
-retrieval_tags 是否准确？经验类型分类是否恰当？
-- 5分: 类型分类正确，from/to stage 准确，factors 和 topics 与内容一致
-- 3分: 大致正确但有小偏差（如应为 blocker_resolve 标为 intent_advance）
-- 1分: 分类明显错误或标签与内容不匹配
+- 5: 类型分类正确，stage/factors/topics 与内容一致
+- 3: 大致正确有小偏差
+- 1: 分类明显错误
 
 ## 输出格式
 
 {
   "scores": {
     "judgment_depth": {"score": 4, "reason": "一句话理由"},
-    "reusability": {"score": 5, "reason": "一句话理由"},
-    "evidence_quality": {"score": 3, "reason": "一句话理由"},
-    "effect_observability": {"score": 4, "reason": "一句话理由"},
-    "tag_accuracy": {"score": 5, "reason": "一句话理由"}
+    "reusability": {"score": 5, "reason": "..."},
+    "evidence_quality": {"score": 3, "reason": "..."},
+    "effect_observability": {"score": 4, "reason": "..."},
+    "tag_accuracy": {"score": 5, "reason": "..."}
   },
   "overall_score": 4.2,
-  "recommendation": "approve | revise | reject",
-  "issues": [
-    "具体问题1: 例如 evidence.before 缺少用户此前的态度表达",
-    "具体问题2: 例如 judgment.alternative_avoided 过于笼统"
-  ],
-  "revision_suggestions": [
-    "修改建议1: 例如 补充对话中用户说'我再看看'的原文作为 before 证据",
-    "修改建议2: 例如 将 alternative_avoided 具体化为'直接报价'"
-  ]
+  "recommendation": "approve(≥4.0) | revise(3.0-3.9) | reject(<3.0)",
+  "issues": ["具体问题"],
+  "revision_suggestions": ["修改建议"]
 }
 
-## 评审标准
-
-- overall_score ≥ 4.0 → approve（建议入库）
-- overall_score 3.0-3.9 → revise（修改后可入库，列出具体修改建议）
-- overall_score < 3.0 → reject（不建议入库，列出主要问题）
-
 ## 注意
-
-- 你是评审者，不是修改者。指出问题和建议，不要重写经验内容。
-- 评审要基于证据，每个评分都要有理由。
-- 对 tag_accuracy 的评审需要参照标签体系定义（意向阶段 S0-S4、话题清单、因素清单）。
+- 你是评审者，不是修改者。指出问题和建议，不要重写经验。
+- 每个评分都要有理由。
 ```
 
 #### User Prompt Template
@@ -792,50 +639,55 @@ S0: 暂缓/流失  S1: 沉默用户  S2: 需求模糊  S3: 需求明确  S4: 强
 
 #### 定位
 
-将经验中的 `execution.approach` 字段匹配到已有的 Approach 节点体系中，保证图谱节点不碎片化。
+将经验中的 `execution.approach` 匹配到已有 Approach 节点体系，保证图谱节点不碎片化。
 
 #### 模型建议
 
-Qwen-Plus / DeepSeek-V3（分类任务，中等模型即可）
+Qwen-Plus / DeepSeek-V3
 
 #### System Prompt
 
 ```markdown
-你是一个销售方法论分类专家。你的任务是判断一条新经验中描述的销售方法（approach），
-是否与已有的方法分类体系中的某个方法本质相同。
+你是一个销售方法论分类专家。判断新经验中的销售方法与已有方法体系的关系。
 
 ## 判断标准
 
-两个方法"本质相同"意味着：
-- 核心策略逻辑一致（解决的问题相同、思路相同）
-- 即使措辞不同、具体话术不同，底层原则是一样的
-- 在同一个情境下，一个有经验的销售主管会认为这是"同一种做法"
+三种判定结果：
 
-两个方法"不同"意味着：
-- 解决的问题不同，或解决同一问题但思路有本质区别
-- 不能仅因为涉及相同话题就判定为相同（比如"用孩子兴趣激发家长认同"和"用孩子成绩焦虑推动家长行动"都涉及"孩子情况"这个话题，但策略逻辑完全不同）
+**matched（匹配）**：与某个已有方法本质相同。核心策略逻辑一致，即使措辞/话术不同。一个有经验的销售主管会认为是"同一种做法"。
+
+**revise（修正）**：与某个已有方法本质相同，但新经验的描述更准确、更完整，或揭示了该方法的更好命名角度。此时应建议修正已有方法的名称或描述。
+
+**new（新建）**：与所有已有方法都不同。解决的问题不同，或思路有本质区别。不能仅因涉及相同话题就判定相同。
 
 ## 输出格式
 
 {
-  "match_result": "matched | new",
-  
-  // 如果 matched:
-  "matched_approach_id": "匹配到的已有 Approach 的 ID",
+  "match_result": "matched | revise | new",
+
+  // matched:
+  "matched_approach_id": "已有 Approach ID",
   "match_confidence": "high | medium",
-  "match_reason": "为什么认为是同一种方法（1-2句）",
-  
-  // 如果 new:
-  "suggested_name": "建议的新 Approach 规范名称（简洁，8字以内）",
-  "suggested_description": "新 Approach 的一句话描述",
-  "differentiation": "与最相似的已有 Approach 的区别是什么"
+  "match_reason": "为什么是同一种方法",
+
+  // revise:
+  "revise_approach_id": "需修正的已有 Approach ID",
+  "revise_confidence": "high | medium",
+  "match_reason": "为什么是同一种方法",
+  "revised_name": "建议修正后的名称（8字以内）",
+  "revised_description": "建议修正后的一句话描述",
+  "revise_reason": "为什么需要修正（原名称有什么问题）",
+
+  // new:
+  "suggested_name": "新 Approach 名称（8字以内，动词+对象+方式）",
+  "suggested_description": "一句话描述",
+  "differentiation": "与最相似已有 Approach 的区别"
 }
 
 ## 注意
-
-- 匹配宁严勿松：不确定时倾向于创建新节点（后续可人工合并，但错误合并很难拆开）
-- match_confidence = medium 时，建议人工复核
-- 新 Approach 的命名应遵循"动词+对象+方式"的模式，如"先挖需求再推方案""用体验数据消除效果怀疑"
+- 匹配宁严勿松：不确定时选 new（后续可人工合并，错误合并难拆）
+- revise 仅在新经验明显优于旧描述时使用，不要因为措辞风格不同就建议修正
+- medium confidence 的 matched/revise 建议人工复核
 ```
 
 #### User Prompt Template
@@ -844,6 +696,7 @@ Qwen-Plus / DeepSeek-V3（分类任务，中等模型即可）
 ## 新经验的方法描述
 
 approach: {execution.approach}
+how: {execution.how}
 experience_type: {experience_type}
 context_stage: {from_stage} → {to_stage}
 factors_addressed: {factors_addressed}
@@ -853,35 +706,100 @@ factors_addressed: {factors_addressed}
 {approach_catalog}
 ```
 
-**`approach_catalog` 格式示例：**
+#### `approach_catalog` 变量构造
 
-```json
-[
-  {
-    "id": "APR_001",
-    "name": "先挖需求再推方案",
-    "description": "不急于介绍课程/报价，先通过提问了解用户的真实需求和背景，再根据需求推荐匹配的方案",
-    "typical_stage": "S1→S2, S2→S3",
-    "typical_factors": ["需求模糊"],
-    "example_count": 12
-  },
-  {
-    "id": "APR_002",
-    "name": "用孩子表现撬动家长认同",
-    "description": "用孩子在体验课/平台上的具体表现（完课率、作品、互动）作为证据，激发家长的认同感和投入意愿",
-    "typical_stage": "S2→S3",
-    "typical_factors": ["学习兴趣", "体验认可"],
-    "example_count": 8
-  }
-]
+直接返回全部 Approach 会随经验库增长变得过多。用新经验自身的特征做**多维过滤 + 分层排序**，控制候选集大小：
+
+```python
+def build_approach_catalog(neo4j_session, experience_type, from_stage, to_stage, factors_addressed):
+    """
+    过滤策略（逐层放宽）:
+      优先级 1: 同路径 + 同类型 + 因素有交集 → 最相关候选
+      优先级 2: 同路径 + 同类型（因素无交集） → 同场景不同因素
+      优先级 3: 相邻路径 + 同类型 → 跨路径但策略逻辑可能相同
+    每层内按 example_count 降序，总数上限 20 条。
+    """
+    results = neo4j_session.run("""
+        MATCH (a:Approach)<-[:EVIDENCE_OF]-(e:Experience)
+        WITH a,
+             collect(DISTINCT e.from_stage + "→" + e.to_stage) AS stage_paths,
+             collect(DISTINCT e.experience_type) AS types,
+             collect(DISTINCT e.factors_addressed) AS all_factors,
+             count(e) AS exp_count
+
+        // 计算相关性分层
+        WITH a, exp_count, stage_paths, types,
+             // 减少嵌套集合: 展平所有经验的 factors_addressed
+             reduce(s = [], fs IN all_factors | s + fs) AS flat_factors,
+             ($from_stage + "→" + $to_stage) IN stage_paths AS same_path,
+             $experience_type IN types AS same_type
+
+        // 相邻路径: from_stage 相同，或 to_stage 相同
+        WITH a, exp_count, stage_paths, types, flat_factors, same_path, same_type,
+             any(p IN stage_paths WHERE
+                 split(p, "→")[0] = $from_stage OR split(p, "→")[1] = $to_stage
+             ) AS adjacent_path
+
+        // 因素交集
+        WITH a, exp_count, stage_paths, types, same_path, same_type, adjacent_path,
+             size([f IN $factors WHERE f IN flat_factors]) > 0 AS factor_overlap
+
+        // 分层: 优先级1 > 2 > 3，层外排除
+        WITH a, exp_count, stage_paths, types,
+             CASE
+                 WHEN same_path AND same_type AND factor_overlap THEN 1
+                 WHEN same_path AND same_type THEN 2
+                 WHEN adjacent_path AND same_type THEN 3
+                 ELSE 0
+             END AS priority
+        WHERE priority > 0
+
+        RETURN a.approach_id AS id,
+               a.name AS name,
+               a.description AS description,
+               exp_count,
+               stage_paths,
+               types,
+               priority
+        ORDER BY priority ASC, exp_count DESC
+        LIMIT 20
+    """, from_stage=from_stage, to_stage=to_stage,
+         experience_type=experience_type, factors=factors_addressed)
+
+    lines = []
+    for r in results:
+        lines.append(
+            f"- [{r['id']}] {r['name']}（{r['description']}）"
+            f"\n  经验数: {r['exp_count']} | "
+            f"路径: {', '.join(r['stage_paths'])} | "
+            f"类型: {', '.join(r['types'])}"
+        )
+    return "\n".join(lines) if lines else "（暂无相关已有 Approach，请输出 new）"
 ```
+
+**过滤效果示例（新经验: blocker_resolve, S2→S3, 因素=["价格敏感"]）：**
+
+```
+优先级 1（同路径 + 同类型 + 因素交集）:
+- [APR-002] 先强化价值再谈价格（面对价格异议，先用体验表现建立价值感再过渡到费用）
+  经验数: 8 | 路径: S2→S3, S3→S4 | 类型: blocker_resolve
+- [APR-009] 拆分费用降低感知（将总价拆为课时单价或按月计算，降低数字冲击）
+  经验数: 3 | 路径: S2→S3 | 类型: blocker_resolve
+
+优先级 2（同路径 + 同类型，因素不同）:
+- [APR-005] 用试听体验化解效果疑虑（建议先体验一次，用实际感受替代口头承诺）
+  经验数: 6 | 路径: S2→S3 | 类型: blocker_resolve
+
+优先级 3（相邻路径 + 同类型）:
+- [APR-011] 锚定竞品价差建立性价比（引入竞品价格对比，重新定义"贵"的参照系）
+  经验数: 2 | 路径: S3→S4 | 类型: blocker_resolve
+```
+
+> 通常返回 5-15 条候选，远小于全量。如果优先级 1 已有足够候选（≥10），可以只取优先级 1 进一步减少干扰。
 
 #### 冷启动说明
 
-初期 Approach 体系为空。前 50 条经验建议：
-1. 跳过 Prompt 2-4，直接人工审核经验中的 approach 字段
-2. 人工归纳出 10-20 个初始 Approach 节点
-3. 从第 51 条经验开始启用 Prompt 2-4 做自动匹配
+初期 Approach 体系为空，`approach_catalog` 输出"暂无已有 Approach"，LLM 必然输出 `new`。前 50 条经验人工审核 approach 字段、归纳出 10-20 个初始 Approach 节点，第 51 条起启用 Prompt 2-4 自动匹配。
 
 ---
 
@@ -891,9 +809,9 @@ factors_addressed: {factors_addressed}
 
 #### 定位
 
-运行时核心 Prompt。接收图谱查询的结构化洞察 + 向量检索的经验证据 + 用户上下文，生成个性化策略卡片。
+运行时核心 Prompt。接收图谱洞察 + 经验证据 + 用户上下文，生成个性化策略卡片。
 
-> GraphRAG 完整流程（图谱查询步骤、降级策略）见 [03-architecture.md](03-architecture.md) Agent 3 章节。
+> GraphRAG 完整流程见 [03-architecture.md](03-architecture.md) Agent 3 章节。
 
 #### 模型建议
 
@@ -902,42 +820,21 @@ Qwen-Plus / DeepSeek-V3（高频调用，需控制成本）
 #### System Prompt
 
 ```markdown
-你是一个销售策略顾问。你的任务是根据用户当前状态和历史经验洞察，为销售生成一份个性化的回访策略卡片。
+你是一个销售策略顾问。根据用户当前状态和历史经验洞察，生成个性化回访策略卡片。
 
 ## 你会收到什么
 
-1. **用户上下文**：用户背景摘要、当前标签萃取结果（话题×因素→意向）
-2. **图谱洞察**（来自 GraphRAG 查询）：
-   - 推荐路径：当前阶段→目标阶段是否存在、有多少经验支撑
-   - 阻塞分析：哪些消极因素在阻碍推进，以及有经验支撑的化解方法
-   - 驱动利用：哪些积极因素可以放大，以及有经验支撑的利用方法
-3. **参考经验**（来自向量检索/图谱关联）：与当前情境最相似的历史成功经验，含对话原文证据
+1. 用户上下文：背景摘要、当前标签萃取结果
+2. 图谱洞察（GraphRAG）：推荐路径、阻塞分析、驱动利用
+3. 参考经验（向量检索/图谱关联）：最相似的历史成功经验
 
-## 生成策略的原则
+## 策略生成原则
 
-### 1. 先化解阻塞，再利用驱动
-- 如果用户存在消极因素（尤其是高阻塞性的），优先安排化解动作
-- 化解不是回避，而是正面应对后转换方向
-- 化解后再利用积极因素做推进
-
-### 2. 策略要具体到"下一步做什么"
-- 不是"建议加强沟通"这种空话
-- 而是"第一通电话先聊孩子体验课的表现，从作品切入，再过渡到课程路径"
-- 每个动作要说明：做什么、为什么这么做、预期用户反应
-
-### 3. 承接渠道上下文
-- 如果用户有直播间来源、客服沟通记录等前置信息，策略必须承接
-- 不要让用户感觉"换了一个人又从头来"
-
-### 4. 参考经验但不照搬
-- 参考经验是"这类情境下别人怎么做成功的"
-- 需要结合当前用户的具体情况做适配
-- 引用经验时说明适用点和需要调整的地方
-
-### 5. 量力而行
-- 策略动作数量控制在 2-4 个，不要贪多
-- 按优先级排序，最重要的放前面
-- 标注每个动作的目的（化解阻塞 / 利用驱动 / 推进意向）
+1. **先化解阻塞，再利用驱动** — 化解不是回避，是正面应对后转换方向
+2. **具体到"下一步做什么"** — 不是"建议加强沟通"，而是"先聊孩子体验课表现，从作品切入"
+3. **承接渠道上下文** — 不让用户感觉"换了个人又从头来"
+4. **参考经验但不照搬** — 结合当前用户具体情况做适配
+5. **量力而行** — 策略动作 2-4 个，按优先级排序
 
 ## 输出格式
 
@@ -945,45 +842,42 @@ Qwen-Plus / DeepSeek-V3（高频调用，需控制成本）
   "strategy_card": {
     "current_stage": "S?",
     "target_stage": "S?",
-    "confidence": "推进到目标阶段的信心评估（high/medium/low）",
-    "confidence_reason": "信心评估的依据（1句）",
+    "confidence": "high/medium/low",
+    "confidence_reason": "依据（1句）",
 
-    "user_summary": "用户当前状态的一句话概括（给销售看的，需要通俗易懂）",
-
-    "key_insight": "最核心的判断洞察（1-2句，告诉销售'这个用户的关键是什么'）",
+    "user_summary": "用户当前状态一句话概括（给销售看，通俗易懂）",
+    "key_insight": "最核心的判断洞察（1-2句）",
 
     "actions": [
       {
         "priority": 1,
         "purpose": "resolve_blocker | leverage_driver | advance_intent",
-        "what": "具体做什么（1句话）",
-        "why": "为什么这么做（1-2句，引用图谱洞察或经验证据）",
-        "how": "怎么做（2-3句，具体到话题切入方式、表达策略）",
-        "avoid": "这个环节不要做什么（1句，常见误区）",
-        "expected_response": "预期用户反应（帮助销售判断是否有效）"
+        "what": "做什么（1句）",
+        "why": "为什么（1-2句，引用图谱洞察或经验证据）",
+        "how": "怎么做（2-3句，具体到话题切入、表达策略）",
+        "avoid": "不要做什么（1句，常见误区）",
+        "expected_response": "预期用户反应"
       }
     ],
 
-    "topic_flow": "建议的话题推进顺序（如：孩子表现 → 学习目标 → 课程路径 → 排课）",
-
-    "fallback": "如果用户反应不如预期，备选方案是什么（1-2句）"
+    "topic_flow": "建议话题推进顺序",
+    "fallback": "用户反应不如预期时的备选方案"
   },
 
   "evidence_references": [
     {
       "experience_id": "引用的经验 ID",
-      "relevance": "为什么这条经验与当前用户相关（1句）",
-      "key_takeaway": "从这条经验中最值得借鉴的点"
+      "relevance": "为什么相关（1句）",
+      "key_takeaway": "最值得借鉴的点"
     }
   ]
 }
 
 ## 注意
-
-- 你是策略顾问，不是话术生成器。提供的是"思路和方向"，不是逐字脚本。
-- 每条策略动作都要有依据（来自图谱洞察或参考经验），不能凭空编造。
-- 如果图谱洞察和参考经验不足以支撑高质量策略，在 confidence 中如实标注 low，并说明原因。
-- 策略卡片是给一线销售看的，语言要直白、可操作，避免术语。
+- 你是策略顾问，不是话术生成器。提供思路和方向，不是逐字脚本。
+- 每条策略动作都要有依据（图谱洞察或参考经验），不能凭空编造。
+- 洞察不足以支撑高质量策略时，confidence 如实标注 low。
+- 策略卡片给一线销售看，语言直白可操作，避免术语。
 ```
 
 #### User Prompt Template
@@ -1002,8 +896,7 @@ Qwen-Plus / DeepSeek-V3（高频调用，需控制成本）
 
 ### 当前标签萃取结果
 意向阶段: {current_stage}
-话题×因素:
-{topics_factors_detail}
+话题×因素: {topics_factors_detail}
 积极因素: {positive_factors}
 消极因素: {negative_factors}
 
@@ -1017,7 +910,7 @@ Qwen-Plus / DeepSeek-V3（高频调用，需控制成本）
 ### 推荐路径
 {current_stage} → {target_stage}
 经验支撑: {transition_evidence_count} 条
-群体基准转化率: {population_transition_rate}（来自标签表统计，仅供参考）
+群体基准转化率: {population_transition_rate}
 
 ### 阻塞分析
 {blocker_analysis}
@@ -1028,7 +921,6 @@ Qwen-Plus / DeepSeek-V3（高频调用，需控制成本）
 ---
 
 ## 参考经验（Top-K 相似经验）
-
 {reference_experiences}
 ```
 
@@ -1036,132 +928,41 @@ Qwen-Plus / DeepSeek-V3（高频调用，需控制成本）
 
 ## 执行工作流
 
-### Demo 版：单对话萃取流程（前期推荐）
+### Demo 版：单对话萃取流程
 
-> **适用阶段：** 冷启动 / Prompt 打磨期 / 配对规则未就绪时。
-> **升级路径：** Demo 版积累 ~100 条经验 + 配对规则跑通后，切换到正式版对比萃取流程。
-
-```
-Step 0: 样本筛选（代码/SQL，非 LLM）
-  近千条已购买用户
-    → leads_score < P60 → 筛出"逆袭型"成交 ~300-400 条
-    （不需要配对，直接进入下一步）
-
-Step 1: 关键时刻定位（Prompt 2-1，批量）
-  ~300-400 条逆袭型成功案例
-    → Prompt 2-1 → 筛出 worth_extracting=true 的 ~200 条
-    → 每条标注 1-3 个关键时刻
-
-  预估成本: ~300 次调用 × Qwen-Plus ≈ 低
-
-Step 2: 单对话经验萃取（Prompt 2-2-lite，批量）
-  ~200 条通过筛选的成功案例
-    → Prompt 2-2-lite（每次输入一条 + 关键时刻标注）
-    → ~300-400 条经验记录（无 contrast_insights）
-
-  预估成本: ~200 次调用 × Qwen-Max ≈ 中低
-  （比对比萃取版便宜：输入 token 约减半，模型可降一档）
-
-Step 3: 质量评审（Prompt 2-3 + 人工）
-  ~300-400 条经验
-    → Prompt 2-3 → 自动评分
-    → 人工审核: 提高审核比例到 50%+（因缺少对照证据，需更多人工判断）
-    → 重点审核: alternative_source="inferred" 的推测项是否合理
-    → 最终入库: ~150-200 条经验
-
-  预估成本: ~400 次调用 × Qwen-Plus ≈ 低
-
-Step 4: Approach 归一化
-  全部人工归纳（经验量 < 200，不启用 Prompt 2-4）
-
-Step 5: 入库
-  向量: 经验 embedding → Milvus
-  图谱: 暂不构建（经验量不足，统计边无意义）
-```
-
-**Demo 版迭代节奏：**
+> 适用：冷启动 / Prompt 打磨期 / 配对规则未就绪。积累 ~100 条经验 + 配对规则跑通后，切换到正式版。
 
 ```
-第一轮（Prompt 打磨期）:
-  取 20 条成功案例 → 跑 Prompt 2-1 + 2-2-lite → 人工逐条审核 → 调整 Prompt
-  目标: Prompt 2-2-lite 的产出经人工审核后 ≥ 60% 直接可用
-
-第二轮（小批量验证期）:
-  取 50 条成功案例 → 跑完全流程 → 人工审核 → 统计各维度评分分布
-  重点关注: alternative_avoided 的推测质量、证据完整性
-  目标: 积累 ~100 条可用经验
-
-第三轮（升级决策点）:
-  评估是否升级到对比萃取版:
-  ✓ 配对规则已跑通且能找到足够的配对样本 → 切换到正式版
-  ✗ 配对数据不足 → 继续 Demo 版扩大样本量
+Step 0: 样本筛选 → leads_score < P60 → "逆袭型"成交 ~300-400 条
+Step 1: Prompt 2-1 批量 → 筛出 worth_extracting=true ~200 条
+Step 2: Prompt 2-2-lite 批量 → ~300-400 条经验（无 contrast_insights）
+Step 3: Prompt 2-3 + 人工审核（50%+） → 入库 ~150-200 条
+Step 4: Approach 全人工归纳（< 200 条，不启用 Prompt 2-4）
+Step 5: 入库 → Milvus + Neo4j（详见 07-experience-ingestion.md）
 ```
-
-**从 Demo 版升级到正式版时的经验处理：**
-
-```
-Demo 版已入库的经验不需要丢弃，但需标记来源:
-  - 添加 extraction_method: "single" 字段（正式版为 "comparative"）
-  - 后续如果同一关键时刻被对比萃取版重新萃取，以对比萃取版为准
-  - Demo 版经验中 alternative_source="inferred" 的字段，
-    在对比萃取版中会被替换为真实的失败案例行为
-```
-
----
 
 ### 正式版：对比萃取流程
 
 ```
-Step 0: 样本筛选（代码/SQL，非 LLM）
-  近千条已购买用户
-    → leads_score < P60 → 筛出"逆袭型"成交 ~300-400 条
-    → 配对匹配 → 生成 ~200 对（成功+失败）
-
-Step 1: 关键时刻定位（Prompt 2-1，批量）
-  ~300-400 条逆袭型成功案例
-    → Prompt 2-1 → 筛出 worth_extracting=true 的 ~200 条
-    → 每条标注 1-3 个关键时刻
-
-  预估成本: ~300 次调用 × Qwen-Plus ≈ 低
-
-Step 2: 经验对比萃取（Prompt 2-2，批量）
-  ~200 对配对样本（成功案例已通过 Step 1 筛选）
-    → Prompt 2-2（每次输入一对 + 关键时刻标注）
-    → ~400-500 条经验记录 + 对比洞察
-
-  预估成本: ~200 次调用 × Claude Sonnet ≈ 中
-
-Step 3: 质量评审（Prompt 2-3 + 人工）
-  ~400-500 条经验
-    → Prompt 2-3 → 自动评分
-    → 人工审核: 优先看 score < 4.0 的（约 40%）
-    → 最终入库: ~300 条高质量经验
-
-  预估成本: ~500 次调用 × Qwen-Plus ≈ 低
-
-Step 4: Approach 归一化（Prompt 2-4）
-  前 50 条: 跳过 Prompt 2-4，人工归纳初始 Approach 体系（~15-20 个节点）
-  第 51 条起: Prompt 2-4 自动匹配 + medium confidence 人工复核
-
-  预估成本: ~250 次调用 × Qwen-Plus ≈ 低
-
-Step 5: 入库
-  向量: 经验 embedding → Milvus
-  图谱: 经验 → TRANSITION/BLOCKS/DRIVES/RESOLVES/LEVERAGES 边 → Neo4j
+Step 0: 样本筛选 → 逆袭型成交 + 配对匹配 → ~200 对
+Step 1: Prompt 2-1 批量 → 筛出 ~200 条
+Step 2: Prompt 2-2 批量 → ~400-500 条经验 + 对比洞察
+Step 3: Prompt 2-3 + 人工审核（低分项优先） → 入库 ~300 条
+Step 4: 前 50 条人工归纳 Approach 体系 → 第 51 条起 Prompt 2-4 自动匹配
+Step 5: 入库 → Milvus + Neo4j
 ```
 
-### Prompt 迭代优化（正式版）
+### Prompt 迭代节奏
 
 ```
-第一轮（Prompt 打磨期）:
-  取 10 对配对案例 → 跑完 Prompt 2-1 至 2-4 → 人工逐条审核 → 调整 Prompt → 重复
-  目标: Prompt 2-2 的产出经人工审核后 ≥ 70% 直接可用
+第一轮（打磨期）: 10-20 个样本 → 跑全流程 → 人工逐条审核 → 调 Prompt
+  目标: 2-2 产出 ≥ 70% 直接可用
 
-第二轮（小批量验证期）:
-  取 50 对配对案例 → 跑完全流程 → 人工审核 → 统计各维度评分分布
-  目标: Prompt 2-3 的评分与人工评分的一致率 ≥ 80%
+第二轮（验证期）: 50 个样本 → 全流程 → 统计评分分布
+  目标: 2-3 评分与人工一致率 ≥ 80%
 
-第三轮（批量生产期）:
-  跑完全量 → Prompt 2-3 自动评审 → 人工只看低分项
+第三轮（生产期）: 全量 → 自动评审 → 人工只看低分项
   目标: 种子经验库 ≥ 200 条
 ```
+
+**从 Demo 版升级到正式版：** Demo 版已入库经验标记 `extraction_method: "single"`，不丢弃。同一关键时刻被对比萃取版重新萃取时，以对比萃取版为准。
