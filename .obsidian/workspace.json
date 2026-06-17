@@ -11,10 +11,14 @@
             "id": "a496cceed32d9c16",
             "type": "leaf",
             "state": {
-              "type": "graph",
-              "state": {},
-              "icon": "lucide-git-fork",
-              "title": "关系图谱"
+              "type": "markdown",
+              "state": {
+                "file": "AI-builder/课程文档/模块5_发布上线全流程.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "模块5_发布上线全流程"
             }
           }
         ]
@@ -179,8 +183,14 @@
       "bases:新建数据库": false
     }
   },
-  "active": "549d21b89bb9c5c9",
+  "active": "a496cceed32d9c16",
   "lastOpenFiles": [
+    "AI-builder/课程文档/模块4_Web应用结构与框架选择.md",
+    "AI-builder/课程文档/模块3_本地vs上线差距在哪.md",
+    "AI-builder/课程文档/模块2_从想法到本地Demo.md",
+    "AI-builder/课程文档/模块1_AI构建产品的基本盘.md",
+    "AI-builder/课程文档/模块0_开场与范式转变.md",
+    "AI-builder/培训框架_AI时代构建产品.md",
     "SalesCopilot/03-architecture.md",
     "SalesCopilot/06-prompts.md",
     "SalesCopilot-Distill/01-pipeline.md",
@@ -201,12 +211,6 @@
     "SalesCopilot-InsightGraph/05-analysis-queries.md",
     "SalesCopilot-InsightGraph/04-pipeline-quality.md",
     "SalesCopilot-InsightGraph/03-graph-schema.md",
-    "SalesCopilot-InsightGraph/02-extraction-model.md",
-    "SalesCopilot-InsightGraph/01-data-input.md",
-    "SalesCopilot-InsightGraph/00-overview.md",
-    "SalesCopilot-InsightGraph",
-    "SalesCopilot/02-infrastructure.md",
-    "SalesCopilot/04-validation.md",
-    "SalesCopilot-Distill/02-experience-model.md"
+    "SalesCopilot-InsightGraph"
   ]
 }
