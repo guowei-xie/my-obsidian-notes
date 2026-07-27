@@ -4,21 +4,17 @@
     "type": "split",
     "children": [
       {
-        "id": "2cd4f9f4ebf62b3e",
+        "id": "a2419c31182d01b4",
         "type": "tabs",
         "children": [
           {
-            "id": "a496cceed32d9c16",
+            "id": "99c706589b353f19",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "htba-team 商分平台/05-客户端插件与偏好同步.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "05-客户端插件与偏好同步"
+              "type": "graph",
+              "state": {},
+              "icon": "lucide-git-fork",
+              "title": "关系图谱"
             }
           }
         ]
@@ -183,19 +179,24 @@
       "bases:新建数据库": false
     }
   },
-  "active": "549d21b89bb9c5c9",
+  "active": "99c706589b353f19",
   "lastOpenFiles": [
+    "SONAR 标签调优平台/03-方法论·可迁移模式.md",
+    "SONAR 标签调优平台/02-后端架构与执行器范式.md",
+    "SONAR 标签调优平台/01-领域模型与三阶段闭环.md",
+    "SONAR 标签调优平台/00-总览.md",
+    "htba-team 商分平台/05-客户端插件与偏好同步.md",
+    "Deka 检索对齐工作台/00-总览.md",
     "Deka 检索对齐工作台/03-方法论·Harness与可迁移模式.md",
     "Deka 检索对齐工作台/02-四阶段方法.md",
     "Deka 检索对齐工作台/01-架构与数据底座.md",
-    "Deka 检索对齐工作台/00-总览.md",
+    "SONAR 标签调优平台",
     "Deka 检索对齐工作台",
     "htba-team 商分平台/04-反馈飞轮·内容提案.md",
     "htba-team 商分平台/03-内容资产·角色包·三件套.md",
     "htba-team 商分平台/02-MCP网关与SQL安全.md",
     "htba-team 商分平台/01-架构与部署.md",
     "htba-team 商分平台/00-总览.md",
-    "htba-team 商分平台/05-客户端插件与偏好同步.md",
     "商分团队插件/02-内容与迭代.md",
     "商分团队插件/00-总览.md",
     "商分团队插件/04-htbi借鉴与增强.md",
@@ -208,10 +209,6 @@
     "AI-builder/课程文档/模块1_AI构建产品的基本盘.md",
     "AI-builder/课程文档/模块0_开场与范式转变.md",
     "AI-builder/培训框架_AI时代构建产品.md",
-    "SalesCopilot/03-architecture.md",
-    "SalesCopilot/06-prompts.md",
-    "SalesCopilot-Distill/01-pipeline.md",
-    "SalesCopilot-Distill/03-graph-schema.md",
     "SalesCopilot-InsightGraph"
   ]
 }
