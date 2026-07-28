@@ -11,10 +11,14 @@
             "id": "99c706589b353f19",
             "type": "leaf",
             "state": {
-              "type": "graph",
-              "state": {},
-              "icon": "lucide-git-fork",
-              "title": "关系图谱"
+              "type": "markdown",
+              "state": {
+                "file": "htba-team 商分平台/00-总览.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "00-总览"
             }
           }
         ]
@@ -181,6 +185,8 @@
   },
   "active": "99c706589b353f19",
   "lastOpenFiles": [
+    "SalesCopilot 策略生成服务/00-总览.md",
+    "SalesCopilot 经验蒸馏服务/00-总览.md",
     "SONAR 标签调优平台/03-方法论·可迁移模式.md",
     "SONAR 标签调优平台/02-后端架构与执行器范式.md",
     "SONAR 标签调优平台/01-领域模型与三阶段闭环.md",
@@ -207,8 +213,6 @@
     "AI-builder/课程文档/模块3_本地vs上线差距在哪.md",
     "AI-builder/课程文档/模块2_从想法到本地Demo.md",
     "AI-builder/课程文档/模块1_AI构建产品的基本盘.md",
-    "AI-builder/课程文档/模块0_开场与范式转变.md",
-    "AI-builder/培训框架_AI时代构建产品.md",
     "SalesCopilot-InsightGraph"
   ]
 }
